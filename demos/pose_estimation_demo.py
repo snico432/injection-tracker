@@ -1,0 +1,584 @@
+"""
+Camera Pose Estimation Demo using Segmentation Model
+This script uses a trained YOLO segmentation model to estimate camera pose
+from live video feed by analyzing segmented object masks.
+"""
+
+import cv2
+import numpy as np
+import argparse
+from ultralytics import YOLO
+
+# Define available models and their paths
+models_to_paths = {
+    '1': '/Users/sebnico/Desktop/CIS4900/injection-tracker/weights/120-epochs-Oct-8/best.pt',
+    '2': '/Users/sebnico/Desktop/CIS4900/injection-tracker/weights/second_dataset/640/best_train6.pt',
+    '3': '/Users/sebnico/Desktop/CIS4900/injection-tracker/weights/second_dataset/1280/best_train12.pt',
+    '4': '/Users/sebnico/Desktop/CIS4900/injection-tracker/weights/second_dataset/2560/best_train15.pt',
+}
+
+
+class PoseEstimator:
+    """Estimates camera pose from segmented masks."""
+    
+    def __init__(self, model_path, camera_matrix=None, dist_coeffs=None):
+        """
+        Initialize pose estimator.
+        
+        Args:
+            model_path: Path to trained YOLO segmentation model
+            camera_matrix: 3x3 camera intrinsic matrix (if None, will use default)
+            dist_coeffs: Distortion coefficients (if None, will use default/zeros)
+        """
+        self.model = YOLO(model_path)
+        
+        # Camera calibration parameters
+        # If not provided, estimate based on image dimensions
+        if camera_matrix is None:
+            # Default camera matrix (will be updated with actual image size)
+            self.camera_matrix = None
+        else:
+            self.camera_matrix = np.array(camera_matrix, dtype=np.float32)
+            
+        if dist_coeffs is None:
+            # Assume no distortion by default
+            self.dist_coeffs = np.zeros((4, 1), dtype=np.float32)
+        else:
+            self.dist_coeffs = np.array(dist_coeffs, dtype=np.float32)
+        
+        # Object dimensions (in real-world units, e.g., millimeters)
+        # These represent a plane/rectangle that we'll use for pose estimation
+        # Adjust these based on your actual object size
+        self.object_width = 100.0  # Width of the segmented object
+        self.object_height = 100.0  # Height of the segmented object
+        
+    def setup_camera_matrix(self, image_width, image_height, fov_degrees=120):
+        """
+        Setup camera matrix from image dimensions and field of view.
+        
+        Args:
+            image_width: Width of the image in pixels
+            image_height: Height of the image in pixels
+            fov_degrees: Field of view in degrees (default 70)
+        """
+        # Calculate focal length from FOV
+        fov_rad = np.radians(fov_degrees)
+        focal_length = (image_width / 2.0) / np.tan(fov_rad / 2.0)
+        
+        # Create camera matrix
+        cx, cy = image_width / 2.0, image_height / 2.0
+        self.camera_matrix = np.array([
+            [focal_length, 0, cx],
+            [0, focal_length, cy],
+            [0, 0, 1]
+        ], dtype=np.float32)
+        
+    def extract_keypoints_from_mask(self, mask):
+        """
+        Extract keypoints from a segmentation mask.
+        Tries to extract corner points or simplified polygon for better pose estimation.
+        
+        Args:
+            mask: Binary mask or polygon points from YOLO (numpy array of shape (n, 2))
+            
+        Returns:
+            2D points (n x 2) suitable for pose estimation
+        """
+        if mask is None or len(mask) == 0:
+            return None
+            
+        # Convert mask to numpy array if needed
+        if isinstance(mask, list):
+            # YOLO returns masks as polygons (list of xy coordinates)
+            points = np.array(mask, dtype=np.float32)
+        else:
+            # Already a numpy array
+            points = np.array(mask, dtype=np.float32)
+            
+            # If it's 1D, reshape it
+            if points.ndim == 1:
+                points = points.reshape(-1, 2)
+            
+            # If it's a binary mask (2D array), find contours
+            if points.ndim > 2 or (len(points) > 1 and points.shape[1] > 100):
+                # This might be a binary mask, try to find contours
+                if mask.dtype != np.uint8:
+                    mask_binary = (mask * 255).astype(np.uint8)
+                else:
+                    mask_binary = mask
+                
+                # Find contours
+                contours, _ = cv2.findContours(mask_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if len(contours) == 0:
+                    return None
+                
+                # Use the largest contour
+                largest_contour = max(contours, key=cv2.contourArea)
+                
+                # Simplify contour to get key points
+                epsilon = 0.02 * cv2.arcLength(largest_contour, True)
+                points = cv2.approxPolyDP(largest_contour, epsilon, True)
+                points = points.reshape(-1, 2).astype(np.float32)
+        
+        # Ensure we have at least 3 points for pose estimation
+        if len(points) < 3:
+            return None
+        
+        # If we have many points, try to simplify to corners or key points
+        if len(points) > 10:
+            # Try to find corners using convex hull or corner detection
+            # For pose estimation, 4-8 points are usually sufficient
+            # Use Douglas-Peucker algorithm to reduce points
+            if len(points) > 4:
+                # Convert to contour format for simplification
+                contour = points.reshape(-1, 1, 2).astype(np.int32)
+                epsilon = 0.05 * cv2.arcLength(contour, True)
+                simplified = cv2.approxPolyDP(contour, epsilon, True)
+                points = simplified.reshape(-1, 2).astype(np.float32)
+        
+        return points
+    
+    def create_3d_model_points(self, num_points):
+        """
+        Create 3D model points for pose estimation.
+        Assumes the segmented object lies on a plane.
+        
+        Args:
+            num_points: Number of 2D points detected
+            
+        Returns:
+            3D model points (n x 3) in object coordinate system
+        """
+        # Create a rectangular model in the XY plane (Z=0)
+        # Adjust dimensions based on your actual object
+        
+        if num_points >= 4:
+            # For rectangular/quadrilateral shapes
+            # Create a rectangle centered at origin
+            w2 = self.object_width / 2.0
+            h2 = self.object_height / 2.0
+            
+            # Try to match the number of detected points
+            if num_points == 4:
+                # Four corners of rectangle
+                model_points = np.array([
+                    [-w2, -h2, 0],
+                    [w2, -h2, 0],
+                    [w2, h2, 0],
+                    [-w2, h2, 0]
+                ], dtype=np.float32)
+            else:
+                # For more points, create a grid or use the contour shape
+                # For simplicity, create a circle/ellipse that matches bounding box
+                angles = np.linspace(0, 2*np.pi, num_points, endpoint=False)
+                model_points = np.array([
+                    [w2 * np.cos(angle), h2 * np.sin(angle), 0]
+                    for angle in angles
+                ], dtype=np.float32)
+        else:
+            # For fewer points, use a simple triangle or point
+            model_points = np.array([
+                [0, 0, 0],
+                [self.object_width/2, 0, 0],
+                [0, self.object_height/2, 0]
+            ][:num_points], dtype=np.float32)
+        
+        return model_points
+    
+    def match_points_2d_to_3d(self, points_2d, model_points_3d):
+        """
+        Match 2D points to 3D model points.
+        For pose estimation, we can use a subset of points or all points.
+        
+        Args:
+            points_2d: Detected 2D points
+            model_points_3d: 3D model points
+            
+        Returns:
+            (matched_2d, matched_3d) tuple
+        """
+        n_2d = len(points_2d)
+        n_3d = len(model_points_3d)
+        
+        # If we have more 2D points than 3D, sample the 2D points
+        if n_2d > n_3d:
+            # Sample evenly spaced points
+            indices = np.linspace(0, n_2d - 1, n_3d, dtype=int)
+            points_2d_matched = points_2d[indices]
+            return points_2d_matched, model_points_3d
+        elif n_2d < n_3d:
+            # Use only the first n_2d 3D points
+            return points_2d, model_points_3d[:n_2d]
+        else:
+            # Same number of points
+            return points_2d, model_points_3d
+    
+    def estimate_pose(self, image, masks):
+        """
+        Estimate camera pose from segmentation masks.
+        
+        Args:
+            image: Input image (for getting dimensions)
+            masks: List of masks from YOLO results
+            
+        Returns:
+            (rotation_vector, translation_vector) or None if estimation fails
+        """
+        if self.camera_matrix is None:
+            h, w = image.shape[:2]
+            self.setup_camera_matrix(w, h)
+        
+        if masks is None or len(masks) == 0:
+            return None
+        
+        # Use the first/largest mask
+        best_mask = None
+        best_area = 0
+        
+        for mask in masks:
+            if mask is None:
+                continue
+                
+            # Get mask area
+            if isinstance(mask, list):
+                mask_array = np.array(mask, dtype=np.float32)
+                area = cv2.contourArea(mask_array.reshape(-1, 1, 2))
+            else:
+                area = np.sum(mask > 0)
+            
+            if area > best_area:
+                best_area = area
+                best_mask = mask
+        
+        if best_mask is None:
+            return None
+        
+        # Extract 2D keypoints
+        points_2d = self.extract_keypoints_from_mask(best_mask)
+        if points_2d is None or len(points_2d) < 3:
+            return None
+        
+        # Create corresponding 3D model points
+        model_points_3d = self.create_3d_model_points(len(points_2d))
+        
+        # Match points
+        points_2d_matched, points_3d_matched = self.match_points_2d_to_3d(
+            points_2d, model_points_3d
+        )
+        
+        if len(points_2d_matched) < 3:
+            return None
+        
+        # Solve PnP to estimate pose
+        try:
+            success, rvec, tvec = cv2.solvePnP(
+                points_3d_matched,
+                points_2d_matched,
+                self.camera_matrix,
+                self.dist_coeffs,
+                flags=cv2.SOLVEPNP_ITERATIVE
+            )
+            
+            if success:
+                return (rvec, tvec)
+            else:
+                return None
+        except cv2.error:
+            return None
+    
+    def draw_pose(self, image, rvec, tvec, length=50):
+        """
+        Draw 3D coordinate axes to visualize camera pose.
+        
+        Args:
+            image: Image to draw on
+            rvec: Rotation vector
+            tvec: Translation vector
+            length: Length of axes in 3D units
+            
+        Returns:
+            Image with drawn axes
+        """
+        # Define 3D points for axes (X, Y, Z)
+        axis_points = np.float32([
+            [0, 0, 0],           # Origin
+            [length, 0, 0],      # X axis
+            [0, length, 0],     # Y axis (points up)
+            [0, 0, -length]      # Z axis (negative because camera looks down -Z)
+        ])
+        
+        # Project 3D points to 2D
+        image_points, _ = cv2.projectPoints(
+            axis_points, rvec, tvec, self.camera_matrix, self.dist_coeffs
+        )
+        
+        image_points = np.int32(image_points).reshape(-1, 2)
+        
+        # Invert Y coordinate to match path coordinate system
+        h, w = image.shape[:2]
+        image_points[:, 1] = h - image_points[:, 1]
+        
+        # Draw axes
+        origin = tuple(image_points[0])
+        cv2.line(image, origin, tuple(image_points[1]), (0, 0, 255), 3)  # X - Red
+        cv2.line(image, origin, tuple(image_points[2]), (0, 255, 0), 3)  # Y - Green
+        cv2.line(image, origin, tuple(image_points[3]), (255, 0, 0), 3)  # Z - Blue
+        
+        return image
+
+
+def parse_arguments():
+    """Parse command line arguments with argparse."""
+    parser = argparse.ArgumentParser(
+        description='Run camera pose estimation using YOLO segmentation model',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python pose_estimation_demo.py 1  # Run with model 1
+  python pose_estimation_demo.py 2  # Run with model 2
+
+Available models:
+  1 - 120-epochs-Oct-8 model
+  2 - second_dataset/640 model
+  3 - second_dataset/1280 model
+  4 - second_dataset/2560 model
+        """
+    )
+    
+    parser.add_argument(
+        'model',
+        type=str,
+        choices=['1', '2', '3', '4'],
+        help='Model number to use (1-4)'
+    )
+    
+    parser.add_argument(
+        '--source',
+        type=int,
+        default=1,
+        help='Video source (default: 1 for webcam)'
+    )
+    
+    parser.add_argument(
+        '--device',
+        type=str,
+        default='mps',
+        choices=['cpu', 'cuda', 'mps'],
+        help='Device to run inference on (default: mps)'
+    )
+    
+    parser.add_argument(
+        '--conf',
+        type=float,
+        default=0.25,
+        help='Confidence threshold for detections (default: 0.25)'
+    )
+    
+    return parser.parse_args()
+
+
+def main():
+    """Main function to run pose estimation on live video."""
+    args = parse_arguments()
+    
+    # Get model path from argument
+    model_path = models_to_paths[args.model]
+    video_source = args.source
+    conf_threshold = args.conf
+    
+    print(f"Using Model {args.model}: {model_path}")
+    
+    # Initialize pose estimator
+    estimator = PoseEstimator(model_path)
+    
+    # Adjust object dimensions based on your actual object size
+    # These should match the real-world size of your segmented object
+    estimator.object_width = 100.0   # millimeters (adjust as needed)
+    estimator.object_height = 100.0  # millimeters (adjust as needed)
+    
+    # Optional: Load camera calibration if available
+    # estimator.camera_matrix = np.load('camera_matrix.npy')
+    # estimator.dist_coeffs = np.load('dist_coeffs.npy')
+    
+    # Open video source
+    cap = cv2.VideoCapture(video_source)
+    
+    if not cap.isOpened():
+        print(f"Error: Could not open video source {video_source}")
+        return
+    
+    print("Starting pose estimation demo...")
+    print("Press 'q' to quit, 'r' to reset calibration")
+    print("Press 'p' to toggle path, '+'/'-' to adjust smoothing, 'c' to clear path")
+    
+    frame_count = 0
+    
+    # Smoothing parameters
+    alpha = 0.0  # Smoothing factor (0.0 = no smoothing, 1.0 = full smoothing)
+    smoothed_rvec = None
+    smoothed_tvec = None
+    
+    # Path tracing
+    show_path = True  # Set to False to disable path
+    max_path_length = 10  # Maximum number of points in path
+    camera_path = []  # List to store camera positions
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+        
+        frame_count += 1
+        
+        # Run segmentation
+        results = estimator.model(frame, conf=conf_threshold, verbose=False)
+        
+        # Process results
+        for result in results:
+            # Draw segmentation masks
+            annotated_frame = result.plot()
+            
+            # Get masks
+            if result.masks is not None:
+                # Try to get polygon coordinates first (preferred)
+                try:
+                    mask_polygons = result.masks.xy.cpu().numpy()
+                except:
+                    # Fallback to binary masks
+                    masks = result.masks.data.cpu().numpy()
+                    
+                    # Convert masks to polygons for better keypoint extraction
+                    mask_polygons = []
+                    for mask in masks:
+                        # Convert mask to binary image
+                        h, w = mask.shape
+                        mask_binary = (mask * 255).astype(np.uint8)
+                        
+                        # Find contour
+                        contours, _ = cv2.findContours(
+                            mask_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                        )
+                        if contours:
+                            # Use largest contour
+                            largest = max(contours, key=cv2.contourArea)
+                            mask_polygons.append(largest.reshape(-1, 2))
+                
+                # Estimate pose
+                if len(mask_polygons) > 0:
+                    pose = estimator.estimate_pose(frame, mask_polygons)
+                    
+                    if pose is not None:
+                        rvec, tvec = pose
+                        
+                        # Smooth the pose estimates
+                        if smoothed_rvec is None:
+                            # First frame - initialize with current pose
+                            smoothed_rvec = rvec.copy()
+                            smoothed_tvec = tvec.copy()
+                        else:
+                            # Exponential moving average for smoothing
+                            smoothed_rvec = (alpha * smoothed_rvec) + ((1 - alpha) * rvec)
+                            smoothed_tvec = (alpha * smoothed_tvec) + ((1 - alpha) * tvec)
+                        
+                        # Draw path trace (camera trajectory)
+                        if show_path:
+                            # Project origin to get 2D position of camera
+                            origin_3d = np.float32([[0, 0, 0]])
+                            origin_2d, _ = cv2.projectPoints(
+                                origin_3d, smoothed_rvec, smoothed_tvec,
+                                estimator.camera_matrix, estimator.dist_coeffs
+                            )
+
+                            # Invert both X and Y coordinates to fix inverted movement
+                            h, w = annotated_frame.shape[:2]
+                            x, y = origin_2d[0][0].astype(int)
+                            camera_path.append((w - x, h - y))
+                            
+                            # Keep path length limited
+                            if len(camera_path) > max_path_length:
+                                camera_path.pop(0)
+                            
+                            # Draw path
+                            if len(camera_path) > 1:
+                                base_color = (255, 200, 0)  # Cyan in BGR (base color)
+                                for i in range(1, len(camera_path)):
+                                    # Vary brightness based on age (newer = brighter)
+                                    # i=1 is oldest segment, i=len-1 is newest segment
+                                    if len(camera_path) > 2:
+                                        age_factor = (i - 1) / (len(camera_path) - 2)  # Normalize to 0-1
+                                    else:
+                                        age_factor = 1.0  # Only one segment, make it bright (newest)
+                                    brightness = 0.4 + age_factor * 0.6  # Fade from 40% (old) to 100% (new)
+                                    color = tuple(int(c * brightness) for c in base_color)
+                                    cv2.line(
+                                        annotated_frame,
+                                        camera_path[i-1],
+                                        camera_path[i],
+                                        color,
+                                        2
+                                    )
+                        
+                        # # Draw pose axes using smoothed pose
+                        # annotated_frame = estimator.draw_pose(
+                        #     annotated_frame, smoothed_rvec, smoothed_tvec, length=100
+                        # )
+
+                        # Draw white ball at the last path position (if path exists)
+                        if show_path and len(camera_path) > 0:
+                            ball_pos = camera_path[-1]  # Use the last point from the path
+                            cv2.circle(annotated_frame, ball_pos, 8, (255, 255, 255), -1)
+                        
+                        # Display pose information
+                        # info_text = [
+                        #     f"Translation: ({smoothed_tvec[0][0]:.1f}, {smoothed_tvec[1][0]:.1f}, {smoothed_tvec[2][0]:.1f})",
+                        #     f"Rotation: ({smoothed_rvec[0][0]:.2f}, {smoothed_rvec[1][0]:.2f}, {smoothed_rvec[2][0]:.2f})",
+                        #     f"Smoothing: {alpha:.2f} | Path: {'ON' if show_path else 'OFF'}"
+                        # ]
+                        
+                        # y_offset = 30
+                        # for i, text in enumerate(info_text):
+                        #     cv2.putText(
+                        #         annotated_frame, text,
+                        #         (10, y_offset + i * 25),
+                        #         cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                        #         (255, 255, 255), 2
+                        #     )
+            
+            # Display frame
+            cv2.imshow('Camera Pose Estimation', annotated_frame)
+        
+        # Handle keyboard input
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('r'):
+            # Reset camera calibration (re-estimate from current frame)
+            h, w = frame.shape[:2]
+            estimator.setup_camera_matrix(w, h)
+            print("Camera calibration reset")
+        elif key == ord('p'):
+            # Toggle path display
+            show_path = not show_path
+            print(f"Path display: {'ON' if show_path else 'OFF'}")
+        elif key == ord('+') or key == ord('='):
+            # Increase smoothing
+            alpha = min(0.95, alpha + 0.05)
+            print(f"Smoothing factor: {alpha:.2f}")
+        elif key == ord('-') or key == ord('_'):
+            # Decrease smoothing
+            alpha = max(0.0, alpha - 0.05)
+            print(f"Smoothing factor: {alpha:.2f}")
+        elif key == ord('c'):
+            # Clear path
+            camera_path = []
+            print("Path cleared")
+    
+    # Cleanup
+    cap.release()
+    cv2.destroyAllWindows()
+    print("Demo finished")
+
+
+if __name__ == '__main__':
+    main()
