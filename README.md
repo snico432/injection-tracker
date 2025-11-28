@@ -6,7 +6,7 @@ The code in this respository is from my CIS4900 Research Project at the Universi
 
 Type 1 diabetics must inject insulin multiple times daily to manage their blood glucose levels. To ensure consistent insulin absorption, it is critical to rotate injection sites; failure to do so can lead to lipodystrophy—a condition characterized by the Cleveland Clinic as “a complete or partial loss of and/or abnormal distribution of adipose (fat) tissue in certain areas of your body.” This variability can disrupt the timing between insulin activity and food absorption, complicating glucose control.
 
-This project proposes a computer vision based system to automatically track injection sites over time. By providing users with feedback on site usage and encouraging proper rotation, the system aims to reduce the risk of lipodystrophy and improve overall treatment efficacy. 
+This project proposes a computer-vision-based system that automatically tracks insulin injection sites over time. By providing users with feedback on site usage and promoting proper rotation practices, the system aims to reduce the risk of lipodystrophy and improve overall treatment efficacy.
 
 ## Current Progress
 
