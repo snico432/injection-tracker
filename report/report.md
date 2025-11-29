@@ -263,3 +263,5 @@ Over the course of multiple training runs, this project evolved from a small pro
 Experiments with varying `imgsz` showed that larger inputs improve mask fidelity but incur substantial latency costs, especially at `imgsz=2560`. Balancing accuracy and runtime efficiency, an `imgsz=1280` configuration currently appears to be the most promising tradeoff for an eventual edge deployment.
 
 Looking ahead, the next phase of work will focus on refining the segmentation model and advancing camera pose estimation, integrating additional sensing modalities to improve spatial accuracy and robustness.
+
+Note: ChatGPT was used to refine this report.
