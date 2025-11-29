@@ -1,42 +1,42 @@
-# Injection Tracker: Dataset and Training Report
+# Injection Tracker: Final Report
 
 ## Introduction
 
-This project explores whether a modern YOLO-based segmentation model can reliably detect and segment the navel under realistic conditions as a step toward an insulin injection location tracking system. The core question is not only whether the model can achieve high accuracy on controlled data, but whether it can remain robust under variations in lighting, posture, camera distance, and background.
+This project investigates the use of a YOLO-based computer vision model for navel segmentation, as a step toward developing an automated insulin injection site tracking system.
 
-Over the term, I iteratively expanded and refined the dataset, trained a sequence of models, and evaluated their performance and runtime characteristics with an eye toward eventual deployment on a resource-constrained edge device. The report focuses on how specific design choices — data format, dataset structure, image resolution (`imgsz`), and training hyperparameters — affect both segmentation quality and practical feasibility.
+Over the term, I iteratively expanded and refined the dataset, trained a sequence of models, and evaluated their performance and runtime characteristics with consideration for deployment on a resource-constrained edge device. The report focuses on how specific design choices — including data format, image resolution (`imgsz`), and training hyperparameters — affect both segmentation quality and practical feasibility.
 
 ## Methods
 
 - **Model and hardware**
-  - All experiments used a pretrained Ultralytics YOLO segmentation model (YOLOv11) that was fine-tuned in Python.
-  - Training was performed primarily on Google Colab with access to an NVIDIA A100 GPU (40 GB), which automatically determined feasible batch sizes for each `imgsz` configuration.
-  - Inference latency was measured on a MacBook Air with an M1 chip.
+  - All experiments used a pretrained Ultralytics YOLOv11 segmentation model, fine-tuned on a custom dataset in Python.
+  - Training was conducted on Google Colab, using both NVIDIA T4 and A100 GPUs.
+  - Inference latency was measured on a MacBook Air (M1) to assess performance on an edge-class device.
 
 - **Data collection and labeling**
-  - Short videos were recorded under a range of lighting and posture conditions (daylight, indoor lighting, bathroom lighting, outdoor daylight, low-light flashlight), then converted to frames using custom preprocessing scripts.
-  - Images were labeled in CVAT to obtain segmentation masks for the navel, with additional negative images (no navel present) to reduce false positives.
-  - For the larger dataset, stratified sampling was used to create training/validation splits that preserved the relative proportions of different capture conditions.
+  - Short videos orbitin the abomen were recorded using a GoPro Hero 11 Black camera under a variety of lighting and posture conditions (daylight, indoor lighting, bathroom lighting, outdoor daylight, and low-light with a flashlight). Frames were extracted using custom preprocessing scripts.
+  - The widest field of view (FOV) was used to maximize the likelihood of capturing the navel within the frame, even when the camera was positioned close to the abdomen.
+  - Images were annotated in CVAT to produce segmentation masks for the navel region.
 
 - **Evaluation protocol and metrics**
-  - Models were evaluated on a held-out validation set for each training run; no separate test set was used in this term’s work.
-  - The evaluation metrics are the default metrics used by YOLO:
-    - **Precision (P)**: fraction of predicted detections that are correct.
-    - **Recall (R)**: fraction of ground-truth objects that are correctly detected.
-    - **mAP@50**: mean Average Precision at an IoU threshold of 0.5, capturing overall detection/segmentation quality at a moderate overlap requirement.
-    - **mAP@50–95**: mean Average Precision averaged over IoU thresholds from 0.5 to 0.95, which is a stricter and more holistic measure of localization and mask quality.
+  - Each model was evaluated on a held-out validation set corresponding to its training run.
+  - Evaluation followed the default YOLO metrics:
+    - **Precision (P)**: proportion of predicted detections that are correct.
+    - **Recall (R)**: proportion of ground-truth objects correctly detected.
+    - **mAP@50**: mean Average Precision at an IoU threshold of 0.5, reflecting detection/segmentation quality under a moderate overlap criterion.
+    - **mAP@50–95**: mean Average Precision averaged over IoU thresholds from 0.5 to 0.95, providing a stricter and more comprehensive measure of localization and mask quality.
 
 ## Dataset and Training Summary
 
-### First Model: Proof-of-Concept
+### First Model: Proof of Concept
 
-The first training run served as a proof-of-concept to validate whether a YOLO segmentation model could reliably segment the navel. I collected three short video clips under varying lighting and posture conditions (daylight, indoor lighting, sitting, and standing). Frames were extracted at 3 fps, yielding **264 images** in total. Two-thirds of the frames were used for training, and the remaining **99 images (36.7%)** were held out for validation.  
+The first training run served as a proof of concept to evaluate whether a YOLO segmentation model could reliably identify and segment the navel. Three short video clips were collected under varied lighting and posture conditions (daylight, indoor lighting, sitting, and standing). Frames were extracted at 3 fps, yielding 264 images in total. Two-thirds of the frames were used for training, while the remaining 99 images (36.7%) were held out for validation.
 
-Although this split was not ideal, the goal was to quickly assess model feasibility. The model was trained for **120 epochs** using YOLO’s default parameters. Despite the small dataset, early results demonstrated promising segmentation performance.
+Although this split was not ideal, the goal at this stage was simply to assess model feasibility. The model was trained for 120 epochs using YOLO’s default hyperparameters. Despite the small dataset, early results demonstrated promising segmentation capability.
 
 #### Results
 
-Unfortunately, when training the first model, I was unaware of the lack of persistent storage in Colab, so I do not have the graphs generated during training. However, I did capture the final performance metrics for the first model on the validation set:
+Due to an issue with persistent storage in Colab, the original training graphs were not saved. However, the final performance metrics on the validation set were recorded as follows:
 
 | Metric | Box | Mask |
 |:--|--:|--:|
@@ -45,27 +45,29 @@ Unfortunately, when training the first model, I was unaware of the lack of persi
 | mAP@50 | 0.479 | 0.370 |
 | mAP@50-95 | 0.145 | 0.099 |
 
-These results, as well as testing on a webcam feed, indicated that the model was indeed able to segment the navel and that there was room for improvement. The next step was to expand the dataset and improve the robustness of the model.
+These results — along with qualitative tests on a live webcam feed — confirmed that the model could detect and segment the navel, though with limited accuracy. The relatively low mAP@50–95 scores highlight insufficient localization precision and segmentation quality, likely due to the small dataset size and lack of visual diversity.
 
----
+The next phase of experimentation focused on expanding the dataset and improving model robustness across lighting and posture variations.
 
-### Second Model: Expanded and More Robust Collection
+### Second Model: Expanded Dataset and Negative Samples
 
 During a live demonstration with Prof. Bruce, the first model exhibited two key issues:
 
-1. **False positives**, e.g., detecting the navel on the ceiling.  
-2. **Poor detection** when the abdomen was compressed (e.g., while sitting hunched over).
+1. **False positives**, such as detecting the navel on the ceiling.
+2. **Poor detection** when the abdomen was compressed (e.g., when sitting hunched over).
 
-To address these, I expanded the dataset and introduced **negative images** (frames without a navel). Initially, I separated negatives into their own folder. I later mixed them into the same folders as positive samples, as I thought that it would make no difference. However, I realized that I should have kept the negatives in a separate folder in order to maintain a clear control over the data being included in training. There were 40 negative images in their own folder, along with any negatives that were included implicitly in the other folders. During training, YOLO reported **62 background images**, indicating that 22 negatives were included implicitly. 
+To address these issues, the dataset was expanded and negative images (frames without a visible navel) were introduced. Initially, the negatives were stored in a separate folder, but were later mixed into the same directories as positive samples under the assumption that it would not affect training. In retrospect, it would have been preferable to keep them separate to maintain explicit control over which negatives were included. In total, 40 negatives were stored in their own folder, with additional negatives implicitly present in other directories. During training, YOLO reported 62 background images, indicating that 22 negatives were included implicitly.
 
-Data was captured under a broader range of lighting conditions to improve robustness:
-- Flashlight-lit low-light indoor setting  
+## Data Collection
+
+Additional data was captured under a broader range of lighting conditions to improve robustness:
+- Low-light indoor scenes illuminated by a flashlight
 - Outdoor daylight conditions  
 - Bathroom lighting conditions  
 
-All new frames were saved as **PNGs** rather than **JPEGs** (the format used to train the first model). Using PNGs helps preserve high-frequency detail, which is important for the model to learn an accurate segmentation of the navel. This was another oversight on my part, as I should have trained on PNGs from the start. However, it is possible that this change may have encouraged the model to learn more generalizable features due to subtle compression artifacts in the JPEGs.
+All new frames were saved as PNGs rather than JPEGs (the format used in the first dataset). PNGs preserve high-frequency detail that is useful for learning fine segmentation boundaries. While this change introduced inconsistency between datasets, it may have unintentionally improved generalization by exposing the model to subtle JPEG compression artifacts in earlier runs.
 
-Otherwise, this model was trained for 300 epochs (vs 120 for the first model), with all other hyperparameters set to YOLO's default values.
+The model was trained for 300 epochs (compared to 120 in the first model), with all other hyperparameters kept at YOLO’s default values.
 
 #### Dataset Composition
 
@@ -80,7 +82,7 @@ Otherwise, this model was trained for 300 epochs (vs 120 for the first model), w
 | Outdoors      | 70 |
 | **Total**     | **729** |
 
-Although there was a mild imbalance across conditions, the dataset size was insufficient to justify truncation. Instead, **stratified sampling** was used to preserve proportional representation between training and validation splits. In future datasets, I will work to ensure conditions are more balanced.
+Although there was mild imbalance across lighting conditions, the dataset size was not large enough to justify truncation to uniform counts per condition. Instead, stratified sampling was used to maintain proportional representation in the training and validation splits. Future datasets will aim for more balanced sampling across conditions.
 
 #### Performance Metrics
 
@@ -91,9 +93,9 @@ Although there was a mild imbalance across conditions, the dataset size was insu
 | mAP@50 | 0.909 | 0.812 |
 | mAP@50-95 | 0.443 | 0.312 |
 
-#### Comparison of the performance metrics for the first and second models.
+#### Comparison to the First Model
 
-From the metrics, it is evident that this model is much more robust than the first model, and is able to segment the navel in a wider variety of conditions. This was confirmed by testing the model on a webcam feed, where the second model was able to segment the navel when it was compressed, while the first model was unable to do so. It also seemed to exhibit less false positives, which is supported by the higher precision metrics for both box and mask compared to the first model. In the table below, we can clearly see the improvement in performance across all metrics.
+The expanded dataset produced a model that is substantially more robust and capable of accurate segmentation under a wider variety of conditions. Testing on a live webcam feed confirmed that the second model correctly segmented the navel even when the abdomen was compressed, whereas the first model failed to do so. False positives were also greatly reduced, consistent with the higher precision observed in both box and mask metrics.
 
 | Metric | Box (First Model) | Box (Second Model) | Mask (First Model) | Mask (Second Model) |
 |:--|--:|--:|--:|--:|
@@ -102,11 +104,9 @@ From the metrics, it is evident that this model is much more robust than the fir
 | mAP@50 | 0.479 | 0.909 | 0.370 | 0.812 |
 | mAP@50-95 | 0.145 | 0.443 | 0.099 | 0.312 |
 
----
+### Third Model: Second Dataset, Larger Image Size
 
-### Third Model: Second Dataset, larger image size
-
-While the previous training runs were performed at an image size of 640x640, this model was trained with `imgsz=1280`. YOLO automatically determined the batch size based on the available GPU memory (40GB on the A100 GPU), which turned out to be 16. All other hyperparameters remained the same as the second model.
+While the previous training runs used an image resolution of 640 × 640, this model was trained with an increased resolution of 1280 × 1280 (imgsz=1280). YOLO automatically determined the batch size based on the available GPU memory (40 GB on the NVIDIA A100), resulting in a batch size of 16. All other hyperparameters remained identical to those used for the second model.
 
 #### Performance Metrics
 
@@ -117,9 +117,10 @@ While the previous training runs were performed at an image size of 640x640, thi
 | mAP@50 | 0.899 | 0.892 |
 | mAP@50-95 | 0.501 | 0.441 |
 
-#### Comparison of the performance metrics for the second and third models.
+#### Comparison with the Second Model
 
-The metrics are relatively similar, with the third model performing slightly better in box metrics, while the second model performs slightly better in mask metrics. This is likely due to the larger image size, which preserves more detail in the image and corresponding label, providing more context for the model to learn from.
+The second model achieved slightly higher box precision, recall, and mAP@50, indicating that it produced a greater number of correct detections overall. However, the third model achieved a higher box mAP@50–95, suggesting that although it detected fewer boxes, the ones it did predict were more accurately localized.
+For segmentation masks, the third model outperformed the second in all metrics, with a particularly large improvement in mAP@50–95 (0.441 vs 0.312). This indicates that increasing image resolution allowed the model to learn from finer spatial details, leading to more precise segmentation boundaries.
 
 | Metric | Box (Second Model) | Box (Third Model) | Mask (Second Model) | Mask (Third Model) |
 |:--|--:|--:|--:|--:|
@@ -129,9 +130,9 @@ The metrics are relatively similar, with the third model performing slightly bet
 | mAP@50-95 | 0.443 | 0.501 | 0.312 | 0.441 |
 
 
-### Fourth Model: Second Dataset, even larger image size
+### Fourth Model: Second Dataset, Largest Image Size
 
-This model was trained at an image size of `imgsz=2560`. YOLO automatically determined the batch size to be 4. All other hyperparameters remained the same as the second and third models.
+This model was trained with an image size of 2560 × 2560 (imgsz=2560). YOLO automatically selected a batch size of 4, given GPU memory constraints. All other hyperparameters were identical to those used in the second and third models.
 
 #### Performance Metrics
 
@@ -142,9 +143,13 @@ This model was trained at an image size of `imgsz=2560`. YOLO automatically dete
 | mAP@50 | 0.903 | 0.910 |
 | mAP@50-95 | 0.504 | 0.508 |
 
-#### Comparison of the performance metrics for the third and fourth models.
+#### Comparison with the Third Model
 
-The metrics are again relatively similar, and the increase in image size does not seem to have a significant impact on performance.
+Box-level performance remained largely similar between the two models, with the fourth model showing a clear improvement in recall (0.879 vs 0.826). This indicates that it successfully detected a greater proportion of navel regions. Mask recall also increased correspondingly, which is expected since segmentation performance is bounded by detection accuracy.
+
+Although the third model achieved slightly higher mask precision, the mAP@50 and mAP@50–95 scores are higher for the fourth model, indicating that its predicted masks were more spatially accurate overall. These results further support the hypothesis that larger training images preserve fine-grained texture and edge information, improving segmentation fidelity.
+
+However, the gains in accuracy come at the cost of significantly reduced inference speed due to the higher input resolution. While the fourth model achieves marginally better quantitative results than the third, the performance improvement may not justify the computational overhead for real-time or embedded deployment scenarios.
 
 | Metric | Box (Third Model) | Box (Fourth Model) | Mask (Third Model) | Mask (Fourth Model) |
 |:--|--:|--:|--:|--:|
@@ -155,7 +160,9 @@ The metrics are again relatively similar, and the increase in image size does no
 
 ### Effect of `imgsz`
 
-The YOLO `imgsz` parameter defines the maximum side length (in pixels) to which each input image is resized during training and inference. For the default `imgsz=640`, original 3840 × 2160 frames are resized to **640 × 360**, each dimension is padded with zeroes to a multiple of 32, and then finally padded to a square. The size to which the images are resized has a significant impact on the fidelity of the mask as can be seen in the examples below. The inference time was measured on a MacBook Air with an M1 chip.
+The YOLO imgsz parameter defines the maximum side length (in pixels) to which each input image is resized during both training and inference. For the default imgsz=640, original 3840 × 2160 frames are resized to 640 × 360, then padded with zeros to form a square.
+
+Image size directly affects the fidelity of segmentation masks, as illustrated below. Inference latency was measured on a MacBook Air (M1).
 
 | Image Size | Inference Time | Notes | Example Image |
 |:------------|--------------------:|:------|:--------------|
@@ -163,11 +170,11 @@ The YOLO `imgsz` parameter defines the maximum side length (in pixels) to which 
 | 1280 | 166.7 ms | Higher mask fidelity | ![image size 1280](./mask_1280.jpg) |
 | 2560 | 750.4 ms | Excellent fidelity, impractical speed | ![image size 2560](./mask_2560.jpg) |
 
-While larger image sizes produced more detailed masks, inference latency increased sharply. Additionally, we saw in the comparisons of the performance metrics that the increase in performance from 1280 to 2560 was not as significant as the increase from 640 to 1280. Given these factors, and the final goal of deployment on an edge device (e.g., an insulin pen companion), the **1280 × 1280** configuration likely offers the best balance between detail and performance. 
+As image size increases, mask detail improves, but inference latency rises sharply. The earlier model comparisons also showed that the improvement in mAP between 1280 and 2560 was marginal compared to the substantial gain from 640 to 1280.
 
-Another option to consider is to crop images to a square region of interest (ROI) before training. This would allow the model to focus on the navel region while maintaining a higher resolution, resulting in a more detailed mask and potentially improved performance. However, this would require more careful planning to ensure we don't lose too much contextual information and that we don't introduce any bias into the training data.
+Given these trade-offs—and the goal of real-time inference on an edge device (e.g., an insulin-injection companion)—an image size of imgsz=1280 appears to offer the best balance between accuracy and efficiency.
 
----
+An additional strategy worth exploring is cropping to a region of interest (ROI) before training. By centering the input on the abdomen, the model could maintain higher effective resolution while reducing unnecessary context. However, this approach would require careful planning to avoid discarding relevant contextual cues and to prevent introducing dataset bias during preprocessing.
 
 ### Utility Scripts
 
@@ -175,10 +182,10 @@ The following custom scripts were used to preprocess and manage data:
 
 | Script | Description |
 |:--|:--|
-| `convert_video.py` | Converts raw videos to image frames. |
-| `count_images.py` | Counts images per folder to verify data balance. |
+| `convert_video.py` | Converts raw video recordings into image frames.|
+| `count_images.py` | Counts the number of images in each folder to verify dataset balance.|
 | `remove_flashlight_unlabelled.py` | Removes unlabeled images inadvertently exported by CVAT. |
-| `train_val_split.py` | Performs stratified train/validation splitting. |
+| `train_val_split.py` | Performs a stratified train/validation split of the dataset. |
 
 ### Demo Scripts
 
@@ -186,12 +193,10 @@ These scripts were used to generate the results and demos throughout the project
 
 | Script | Description |
 |:--|:--|
-| `live_segmentation_demo.py` | Runs a segmentation model on a live webcam feed. |
-| `video_segmentation_demo.py` | Segments a video using a segmentation model and saves the results. |
-| `pose_estimation_demo.py` | Estimates the camera's pose on a live webcam feed using the mask generated by a segmentation model. |
-| `imgsz_demo.py` | Visualizes the fidelity of the predicted mask at different image sizes. |
-
----
+| `live_segmentation_demo.py` | Runs a segmentation model on a live webcam feed in real time. |
+| `video_segmentation_demo.py` | Applies a segmentation model to a video and saves the output.|
+| `pose_estimation_demo.py` | Estimates camera pose on a live webcam feed using the segmentation mask. |
+| `imgsz_demo.py` | Visualizes differences in mask fidelity across varying image sizes. |
 
 ## Training Graphs
 
@@ -204,21 +209,21 @@ Recall that the training graphs for the first model are not available.
 ### Fourth Model
 ![training graphs](./results_train15.png)
 
-For all models, the training loss steadily decreases for both box and mask. While the validation loss for box also steadily decreases, the validation segmentation loss starts to increase after about 100 epochs, indicating that the model is overfitting. This is particularly evident in the fourth model, where the validation segmentation loss has the sharpest increase, likely due to the small batch size of 4 required at this image size. The smaller batch size introduces noisier estimates of the gradient of the loss function, leading to less stable gradients and impacting the model's ability to learn robust features.
+Across all models, training loss decreases steadily for both the box and mask components. While the validation box loss also decreases consistently, the validation segmentation loss begins to increase after approximately 100 epochs, indicating the onset of overfitting.
 
-In order to address this next term, I will experiment with adjusting the hyperparameters of the model to improve generalization. I will also explore further data augmentation techniques, such as rotation, scaling, and shearing. In addition to collecting more data, I will also try to implement regularization techniques, such as weight decay and dropout.
+This trend is particularly pronounced in the fourth model, where the validation segmentation loss shows the steepest increase. The most likely cause is the small batch size (4) required at this high image resolution. Smaller batch sizes yield noisier gradient estimates, resulting in less stable convergence and reduced generalization performance.
 
----
+To mitigate these effects, future experiments will focus on tuning hyperparameters to improve generalization, as well as incorporating data augmentation techniques (e.g., rotation, scaling, and shearing). In addition, I plan to collect more training data and explore regularization strategies such as weight decay and dropout to reduce overfitting.
 
 ## Pose Estimation
 
-Though the main focus this term was to develop a segmentation model, I tried estimating the camera's pose using the mask generated by the segmentation model. This was done by using the segmentation model to generate a mask of the navel, extracting keypoints from the mask, and then using the keypoints to estimate the camera's pose. The pose estimation script was generated by an LLM. The GIF below shows the results of using the second model for pose estimation. 
+Although the primary focus of this term was the development of the segmentation model, I also conducted preliminary experiments in camera pose estimation using the segmentation outputs. The approach involved generating a navel mask for each frame, extracting keypoints from the mask, and tracking the change in keypoint positions over time to estimate the camera’s motion.
+
+The pose estimation script was generated with the assistance of a large language model (LLM). The GIF below demonstrates the results of applying the second segmentation model for pose estimation.
 
 ![Pose estimation demo](./output_pose.gif)
 
-Although the pose estimation is not perfect, it is a promising result. Additionally, I would like to augment the pose estimation with additional sensors, such as an IMU or ToF sensor, and alternative pipelines, such as a sensor fusion approach using a Transformer.
-
----
+While the pose estimation results are not yet precise, they demonstrate promising potential for future work. In subsequent iterations, I plan to augment the system with additional sensing modalities, such as an IMU (Inertial Measurement Unit) or Time-of-Flight (ToF) sensor, and to explore sensor fusion pipelines leveraging architectures such as Transformers for improved temporal and spatial accuracy.
 
 ## Improvements and Next Steps
 
@@ -227,7 +232,7 @@ The following improvements and next steps will be explored in the next term:
 - **Model and training**
   - Collect additional data, especially under rare or challenging conditions, and maintain clearer dataset organization (descriptive folder names, explicit separation of negatives) to preserve clean splits and balanced representation across lighting and posture.
   - Experiment with hyperparameters (e.g., learning rate schedule, weight decay, dropout) to improve generalization and reduce the overfitting seen in the segmentation loss curves.
-  - Systematically evaluate stronger augmentations (rotation, scaling, shearing, brightness/contrast changes, noise) using Albumentations beyond YOLO’s defaults.
+  - Experiment with data augmentation techniques (rotation, scaling, shearing, brightness/contrast changes, noise) using Albumentations beyond YOLO’s defaults.
 
 - **Data and preprocessing**
   - Standardize the training and inference resolution (e.g., prefer `imgsz=1280` based on the current accuracy–latency trade-off) and benchmark inference at this resolution on the target edge hardware.
@@ -243,22 +248,18 @@ The following improvements and next steps will be explored in the next term:
 - **Project focus for next term**
   - Defer complex 3D hardware design in favor of building a compact camera + IMU/ToF prototype and iterating on a robust segmentation-and-pose pipeline that can eventually transfer to an insulin-pen-like device.
 
----
-
 ## Lessons Learned
 
-Transitioning from theoretical understanding to practical implementation in computer vision involves significant operational and organizational complexity. Beyond model theory, success requires careful dataset management, systematic documentation, and iterative experimentation.  
+Transitioning from theoretical understanding to practical implementation in computer vision introduces substantial operational and organizational complexity. Beyond model architecture and training theory, success depends on effective dataset management, systematic documentation, and iterative experimentation.
 
-Initially, I used non-descriptive directory names (e.g., “1,” “2,” “3”), which can become cumbersome as the dataset grows. Similarly, my initial treatment of negative images revealed the importance of explicit dataset structuring and labeling discipline.  
+Early in the project, I used non-descriptive directory names (e.g., “1,” “2,” “3”), which can become cumbersome as the dataset grows. Similarly, my initial handling of negative samples underscored the importance of explicit dataset structure and consistent labeling practices.
 
-I also learned that model performance depends not only on algorithm choice but on many interrelated factors: hyperparameters, data format (JPEG vs PNG), train/validation strategy, and environmental variability (lighting, posture, camera distance, resolution). Each factor influences how well a model generalizes beyond controlled conditions — a critical insight for future applied ML projects.
-
----
+I also learned that model performance depends not solely on the choice of algorithm but on a network of interrelated factors — including hyperparameters, data format (JPEG vs. PNG), train/validation strategy, and environmental variability (lighting, posture, camera distance, and resolution). Each of these factors influences how well a model generalizes beyond controlled conditions, a key insight that will guide my future work.
 
 ## Conclusion
 
-Over the course of several training runs, the project progressed from a small proof-of-concept model to a substantially more robust segmentation system trained on a larger, more diverse dataset. Quantitatively, the best models improved mask performance from an initial mAP@50 of 0.370 to over 0.890, while also significantly increasing box-level precision and recall.
+Over the course of multiple training runs, this project evolved from a small proof-of-concept model into a substantially more robust segmentation system trained on a larger, more diverse dataset. Quantitatively, the best models improved mask performance from an initial mAP@50 of 0.370 to over 0.890, while also significantly increasing box-level precision and recall.
 
-At the same time, systematic experiments with image size (`imgsz`) showed that larger inputs improve mask fidelity but incur substantial latency costs, especially at `imgsz=2560`. Based on the balance between accuracy and runtime, an `imgsz` of 1280 currently appears to be the most promising configuration for an eventual edge deployment.
+Experiments with varying `imgsz` showed that larger inputs improve mask fidelity but incur substantial latency costs, especially at `imgsz=2560`. Balancing accuracy and runtime efficiency, an `imgsz=1280` configuration currently appears to be the most promising tradeoff for an eventual edge deployment.
 
-Looking ahead, the next phase of work will focus on strengthening generalization through better data organization, augmentation, and regularization; refining the pose-estimation pipeline (including camera calibration and sensor fusion); and iterating toward a compact hardware prototype that can support real-time segmentation and pose estimation in realistic usage scenarios.
+Looking ahead, the next phase of work will focus on refining the segmentation model and advancing camera pose estimation, integrating additional sensing modalities to improve spatial accuracy and robustness.
