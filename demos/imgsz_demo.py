@@ -12,8 +12,9 @@ models = [
 
 imgsz_values = [640, 1280, 2560]
 
-img_path = "/Users/sebnico/Desktop/CIS4900/injection-tracker/processed_second_dataset/images/train/outdoors/frame_00011.png"
+# img_path = "/Users/sebnico/Desktop/CIS4900/injection-tracker/processed_second_dataset/images/train/outdoors/frame_00011.png"
+img_path = "/Users/sebnico/Desktop/CIS4900/injection-tracker/junk/better_clip/frame_00015.png"
 for imgsz, model in zip(imgsz_values, models):
     model = YOLO(model)
     results = model.predict(img_path, imgsz=imgsz)
-    results[0].plot(labels=False, boxes=False, masks=True, save=True, filename=f"./report/result_{imgsz}.jpg")
+    results[0].plot(labels=False, boxes=False, masks=True, save=True, filename=f"./report/assets/mask_{imgsz}.jpg")

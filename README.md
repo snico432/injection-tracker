@@ -1,5 +1,7 @@
 # CIS4900: Injection Tracker
 
+![Injection Tracker](./report/assets/demo.gif)
+
 The code in this respository is from my CIS4900 Research Project at the University of Guelph. It is a proof of concept for a computer vision based system to automatically track injection sites over time.
 
 ## Purpose

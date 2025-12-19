@@ -77,8 +77,8 @@ def extract_frames_ffmpeg(
 
 
 if __name__ == "__main__":
-    name = "flashlight"
-    video_path = Path(f"./{name}.mp4")
-    output_dir = Path(f"./frames/{name}")
+    name = "better_clip"
+    video_path = Path(f"./demos/{name}.mp4")
+    output_dir = Path(f"./junk/{name}")
     
     extract_frames_ffmpeg(video_path, output_dir, fps=3.0, format="png")

@@ -166,9 +166,9 @@ Image size directly affects the fidelity of segmentation masks, as illustrated b
 
 | Image Size | Inference Time | Notes | Example Image |
 |:------------|--------------------:|:------|:--------------|
-| 640  | 51.7 ms | Fast; acceptable accuracy | ![image size 640](./mask_640.jpg) |
-| 1280 | 166.7 ms | Higher mask fidelity | ![image size 1280](./mask_1280.jpg) |
-| 2560 | 750.4 ms | Excellent fidelity, impractical speed | ![image size 2560](./mask_2560.jpg) |
+| 640  | 51.7 ms | Fast; acceptable accuracy | ![image size 640](./assets/mask_640.jpg) |
+| 1280 | 166.7 ms | Higher mask fidelity | ![image size 1280](./assets/mask_1280.jpg) |
+| 2560 | 750.4 ms | Excellent fidelity, impractical speed | ![image size 2560](./assets/mask_2560.jpg) |
 
 As image size increases, mask detail improves, but inference latency rises sharply. The earlier model comparisons also showed that the improvement in mAP between 1280 and 2560 was marginal compared to the substantial gain from 640 to 1280.
 
@@ -203,11 +203,11 @@ These scripts were used to generate the results and demos throughout the project
 ### First Model
 Recall that the training graphs for the first model are not available.
 ### Second Model
-![training graphs](./results_train6.png)
+![training graphs](./assets/results_train6.png)
 ### Third Model
-![training graphs](./results_train12.png)
+![training graphs](./assets/results_train12.png)
 ### Fourth Model
-![training graphs](./results_train15.png)
+![training graphs](./assets/results_train15.png)
 
 Across all models, training loss decreases steadily for both the box and mask components. While the validation box loss also decreases consistently, the validation segmentation loss begins to increase after approximately 100 epochs, indicating the onset of overfitting.
 
@@ -221,7 +221,7 @@ Although the primary focus of this term was the development of the segmentation 
 
 The pose estimation script was generated with the assistance of a large language model (LLM). The GIF below demonstrates the results of applying the second segmentation model for pose estimation.
 
-![Pose estimation demo](./output_pose.gif)
+![Pose estimation demo](./assets/demo.gif)
 
 While the pose estimation results are not yet precise, they demonstrate promising potential for future work. In subsequent iterations, I plan to augment the system with additional sensing modalities, such as an IMU (Inertial Measurement Unit) or Time-of-Flight (ToF) sensor, and to explore sensor fusion pipelines leveraging architectures such as Transformers for improved temporal and spatial accuracy.
 
