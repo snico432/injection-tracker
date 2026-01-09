@@ -10,11 +10,6 @@ Type 1 diabetics must inject insulin multiple times daily to manage their blood 
 
 This project proposes a computer-vision-based system that automatically tracks insulin injection sites over time. By providing users with feedback on site usage and promoting proper rotation practices, the system aims to reduce the risk of lipodystrophy and improve overall treatment efficacy.
 
-## Directory Structure
+## Report
 
-The project is organized into the following directories:
-
-- `data_processing`: Contains the code for processing the data.
-- `demos`: Contains the code for the demos.
-- `report`: Contains the report for the project.
-- `training`: Contains the notebook used for training the models.
+The final report for this project can be found [here](./report/report.md).
